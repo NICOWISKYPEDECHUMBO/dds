@@ -283,6 +283,94 @@
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: #f0f2f5; }
   ::-webkit-scrollbar-thumb { background: #c4c8d0; border-radius: 4px; }
+
+  /* ── ALERTA SIRENE NOVA EMPRESA ─────────────────────────────── */
+  @keyframes sirene-bg {
+    0%,100% { background: #ff2d2d; }
+    50%      { background: #ff8c00; }
+  }
+  @keyframes sirene-scale {
+    0%,100% { transform: scale(1); }
+    50%      { transform: scale(1.04); }
+  }
+  @keyframes sirene-glow {
+    0%,100% { box-shadow: 0 0 30px 8px rgba(255,45,45,0.7), 0 8px 40px rgba(0,0,0,0.4); }
+    50%      { box-shadow: 0 0 50px 16px rgba(255,140,0,0.8), 0 8px 40px rgba(0,0,0,0.4); }
+  }
+  @keyframes sirene-spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
+  @keyframes fade-in-down {
+    from { opacity:0; transform: translateY(-40px) scale(0.92); }
+    to   { opacity:1; transform: translateY(0) scale(1); }
+  }
+  @keyframes badge-pulse {
+    0%,100% { transform: scale(1); opacity:1; }
+    50%      { transform: scale(1.15); opacity:0.85; }
+  }
+  .sirene-overlay {
+    position: fixed; inset: 0; z-index: 9000;
+    background: rgba(0,0,0,0.65);
+    display: none; align-items: center; justify-content: center;
+    backdrop-filter: blur(3px);
+  }
+  .sirene-overlay.open { display: flex; }
+  .sirene-box {
+    background: #ff2d2d; border-radius: 20px;
+    padding: 36px 40px; max-width: 480px; width: 92%;
+    text-align: center; color: #fff;
+    animation: sirene-scale 0.6s ease-in-out infinite, sirene-glow 0.6s ease-in-out infinite, fade-in-down 0.35s ease-out;
+  }
+  .sirene-icon {
+    font-size: 56px; line-height: 1; margin-bottom: 6px;
+    display: inline-block;
+    animation: sirene-spin 1.2s linear infinite;
+  }
+  .sirene-titulo {
+    font-size: 26px; font-weight: 900; letter-spacing: -0.5px;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    margin-bottom: 4px;
+  }
+  .sirene-sub {
+    font-size: 13px; opacity: 0.88; margin-bottom: 18px;
+  }
+  .sirene-empresa {
+    background: rgba(255,255,255,0.18); border-radius: 12px;
+    padding: 14px 18px; margin-bottom: 20px; text-align: left;
+  }
+  .sirene-empresa b { font-size: 17px; display: block; margin-bottom: 2px; }
+  .sirene-empresa span { font-size: 12px; opacity: 0.85; }
+  .sirene-badge {
+    display: inline-block; background: #fff; color: #ff2d2d;
+    font-weight: 900; font-size: 13px; border-radius: 20px;
+    padding: 5px 16px; margin-bottom: 18px;
+    animation: badge-pulse 0.6s ease-in-out infinite;
+  }
+  .sirene-btns { display: flex; gap: 10px; justify-content: center; }
+  .sirene-btn-ok {
+    background: #fff; color: #ff2d2d; border: none;
+    border-radius: 10px; padding: 11px 28px; font-size: 14px;
+    font-weight: 800; cursor: pointer; flex: 1;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+  }
+  .sirene-btn-ok:hover { background: #ffe0e0; }
+  .sirene-btn-ver {
+    background: rgba(255,255,255,0.2); color: #fff;
+    border: 2px solid rgba(255,255,255,0.6);
+    border-radius: 10px; padding: 11px 20px; font-size: 14px;
+    font-weight: 700; cursor: pointer; flex: 1;
+  }
+  .sirene-btn-ver:hover { background: rgba(255,255,255,0.32); }
+
+  /* mini badge na linha da tabela */
+  .badge-novo {
+    display: inline-block; background: #ff2d2d; color: #fff;
+    font-size: 9px; font-weight: 800; border-radius: 8px;
+    padding: 1px 5px; margin-left: 5px; vertical-align: middle;
+    animation: badge-pulse 1s ease-in-out infinite;
+    letter-spacing: 0.03em;
+  }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
@@ -495,6 +583,24 @@
   </div>
 </div>
 
+<!-- SIRENE NOVA EMPRESA -->
+<div class="sirene-overlay" id="sirene-modal">
+  <div class="sirene-box">
+    <div class="sirene-icon">🚨</div>
+    <div class="sirene-titulo">NOVA EMPRESA!</div>
+    <div class="sirene-sub">Cadastrada nos últimos 3 dias</div>
+    <div class="sirene-badge" id="sirene-badge">NOVO</div>
+    <div class="sirene-empresa">
+      <b id="sirene-nome">—</b>
+      <span id="sirene-info">—</span>
+    </div>
+    <div class="sirene-btns">
+      <button class="sirene-btn-ok" onclick="fecharSirene()">✓ Entendido</button>
+      <button class="sirene-btn-ver" onclick="fecharSirene()">Ver na tabela</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const APPS_SCRIPT = `const SHEET_NAME = 'Dados';
 
@@ -593,6 +699,44 @@ function setSync(state, msg) {
   document.getElementById('sync-txt').textContent = msg;
 }
 
+// Converte qualquer formato de data para YYYY-MM-DD
+function parseDate(val) {
+  if (!val && val !== 0) return '';
+  if (val instanceof Date && !isNaN(val)) {
+    const y = val.getFullYear();
+    const m = String(val.getMonth()+1).padStart(2,'0');
+    const d = String(val.getDate()).padStart(2,'0');
+    return y+'-'+m+'-'+d;
+  }
+  const s = val.toString().trim();
+  if (!s || s === '0') return '';
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  // DD/MM/YYYY
+  let match = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (match) return match[3]+'-'+match[2].padStart(2,'0')+'-'+match[1].padStart(2,'0');
+  // MM-DD-YYYY
+  match = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})/);
+  if (match) return match[3]+'-'+match[1].padStart(2,'0')+'-'+match[2].padStart(2,'0');
+  // Excel serial
+  const n = parseFloat(s);
+  if (!isNaN(n) && n > 40000 && n < 60000) {
+    const dt = new Date(Math.round((n-25569)*86400*1000));
+    return dt.getUTCFullYear()+'-'+String(dt.getUTCMonth()+1).padStart(2,'0')+'-'+String(dt.getUTCDate()).padStart(2,'0');
+  }
+  const part = s.split(/[ T]/)[0];
+  if (part !== s) return parseDate(part);
+  return '';
+}
+
+// Campos que devem ser tratados como data
+const DATE_FIELDS = ['dataContrato','dataVistoria','planilha','procuracao','soc',
+  'checklist','nr1psico','nr1rel','ghe','emissaoPdf','pgto2','envioPdf','dataReuniao'];
+
+function normalizarDatasRecord(r) {
+  DATE_FIELDS.forEach(f => { if (r[f] !== undefined) r[f] = parseDate(r[f]); });
+  return r;
+}
+
 async function loadFromSheets() {
   if (!SCRIPT_URL) { loadLocal(); return; }
   setSync('syncing','Carregando...');
@@ -600,7 +744,7 @@ async function loadFromSheets() {
     const r = await fetch(SCRIPT_URL + '?action=load');
     const data = await r.json();
     if (data.ok) {
-      records = data.records;
+      records = data.records.map(normalizarDatasRecord);
       saveLocal();
       setSync('','Sincronizado ✓');
       renderTable();
@@ -627,7 +771,7 @@ function loadLocal() {
     const d = localStorage.getItem('cronograma_bk');
     if (d) {
       const saved = JSON.parse(d);
-      if (saved && saved.length >= records.length) records = saved;
+      if (saved && saved.length >= records.length) records = saved.map(normalizarDatasRecord);
     }
   } catch(e) {}
   setSync('', SCRIPT_URL ? 'Offline — dados locais' : 'Sem banco configurado');
@@ -848,6 +992,7 @@ function setField(idx, field, val) {
 function addRow() {
   records.push({
     id:uid(), finalizado:false,
+    createdAt: new Date().toISOString(),
     respComercial:'', respDoc:'', dataContrato:'', pgtoSinal:'', tipoContrato:'',
     empresa:'', fantasia:'', dataVistoria:'', bairro:'',
     respVistoria:'', contatoVistoria:'',
@@ -914,8 +1059,11 @@ function renderTable() {
       <td class="td-sel">${selHtml(idx,'pgtoSinal',OPTS_PGTO)}</td>
       <td class="td-sel">${selHtml(idx,'tipoContrato',OPTS_TIPO)}</td>
       <td class="td-emp">
-        <div class="emp-nome"><input type="text" value="${esc(r.empresa)}" placeholder="Nome da empresa"
-          onchange="setField(${idx},'empresa',this.value)" onblur="setField(${idx},'empresa',this.value)"></div>
+        <div class="emp-nome" style="display:flex;align-items:center">
+          <input type="text" value="${esc(r.empresa)}" placeholder="Nome da empresa"
+            onchange="setField(${idx},'empresa',this.value)" onblur="setField(${idx},'empresa',this.value)">
+          ${isNova(r) ? '<span class="badge-novo">NOVO</span>' : ''}
+        </div>
         <div class="emp-fan"><input type="text" value="${esc(r.fantasia)}" placeholder="Nome fantasia"
           onchange="setField(${idx},'fantasia',this.value)" onblur="setField(${idx},'fantasia',this.value)"></div>
       </td>
@@ -1101,6 +1249,53 @@ function setupScrollSync() {
   setTimeout(updateSpacer, 500);
 }
 
+// ─── SIRENE NOVA EMPRESA ─────────────────────────────────────────────────────
+function isNova(r) {
+  if (!r.createdAt) return false;
+  const diff = (Date.now() - new Date(r.createdAt).getTime()) / (1000*60*60*24);
+  return diff <= 3;
+}
+
+function verificarNovas() {
+  const novas = records.filter(isNova);
+  if (novas.length === 0) return;
+  // Mostra a mais recente primeiro
+  novas.sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const r = novas[0];
+  const horas = Math.floor((Date.now() - new Date(r.createdAt).getTime()) / (1000*60*60));
+  const dias  = Math.floor(horas / 24);
+  const tempoStr = dias === 0
+    ? (horas === 0 ? 'Agora mesmo!' : `Há ${horas}h`)
+    : `Há ${dias} dia${dias>1?'s':''}`;
+
+  document.getElementById('sirene-nome').textContent = r.empresa || '(nome não preenchido)';
+  document.getElementById('sirene-info').textContent =
+    `${r.bairro ? r.bairro + ' · ' : ''}${r.respComercial ? 'Resp: ' + r.respComercial + ' · ' : ''}${tempoStr}`;
+  document.getElementById('sirene-badge').textContent =
+    novas.length > 1 ? `🆕 ${novas.length} NOVAS EMPRESAS` : '🆕 NOVA EMPRESA';
+  document.getElementById('sirene-modal').classList.add('open');
+
+  // Toca som de alerta (beep via Web Audio API)
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [0, 0.18, 0.36].forEach(t => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = 880;
+      osc.type = 'square';
+      gain.gain.setValueAtTime(0.18, ctx.currentTime + t);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.14);
+      osc.start(ctx.currentTime + t);
+      osc.stop(ctx.currentTime + t + 0.15);
+    });
+  } catch(e) {}
+}
+
+function fecharSirene() {
+  document.getElementById('sirene-modal').classList.remove('open');
+}
+
 (function init() {
   if (SCRIPT_URL || bannerHidden) {
     hideBanner();
@@ -1119,6 +1314,9 @@ function setupScrollSync() {
       toast(`🚨 ${atrasadas.length} empresa(s) com prazo estourado! Verifique os alertas.`);
     }
   }, 1500);
+
+  // Sirene de nova empresa
+  setTimeout(verificarNovas, 2000);
 })();
 </script>
 </body>
