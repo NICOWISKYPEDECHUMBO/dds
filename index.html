@@ -168,8 +168,8 @@
   th.g-contrato { background: #1a3560; }
   th.g-docs   { background: #0f4a2e; }
   th.g-vistoria { background: #3a1555; }
-  /* CHECKLIST e NR1 agora azuis como vistoria */
-  th.g-nr1    { background: #3a1555; }
+  /* CHECKLIST e NR1 em azul */
+  th.g-nr1    { background: #1a3a8f; }
   th.g-entrega{ background: #0e3868; }
 
   tbody tr { border-bottom: 1px solid var(--cinza-borda); }
@@ -354,7 +354,7 @@
   <th class="g-emp" style="min-width:220px">EMPRESA</th>
   <th class="g-emp">NOME FANTASIA</th>
   <th class="g-vistoria">DATA VISTORIA</th>
-  <th class="g-emp">BAIRRO</th>
+  <th class="g-vistoria">BAIRRO</th>
   <th class="g-vistoria">NOME RESPONSÁVEL DA VISTORIA</th>
   <th class="g-vistoria">CONTATO DO RESPONS DA VISTORIA</th>
   <th class="g-docs">PLANILHA RECEBIDA</th>
@@ -458,12 +458,40 @@
 <!-- MODAL RELATÓRIO POR PENDÊNCIA -->
 <div class="rel-back" id="modal-relatorio">
   <div class="rel-box">
-    <h3>📊 Relatório por Tipo de Serviço Pendente</h3>
-    <p class="sub">Filtre empresas por pendência específica para priorizar ações</p>
+    <h3>📊 Relatório / PROCV</h3>
+    <p class="sub">Filtre por pendência ou digite qualquer valor para buscar em todas as colunas (como PROCV do Excel)</p>
+    <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center">
+      <input type="text" id="procv-input" placeholder="🔍 PROCV — buscar por empresa, bairro, responsável, contato..."
+        oninput="aplicarProcv()"
+        style="flex:1;border:1.5px solid #1e40af;border-radius:8px;padding:8px 12px;font-size:13px;outline:none;">
+      <select id="procv-col" onchange="aplicarProcv()"
+        style="border:1.5px solid #1e40af;border-radius:8px;padding:8px 10px;font-size:12px;background:#f0f4ff;outline:none;cursor:pointer">
+        <option value="todas">Todas as colunas</option>
+        <option value="empresa">Empresa</option>
+        <option value="fantasia">Nome Fantasia</option>
+        <option value="bairro">Bairro</option>
+        <option value="respComercial">Resp. Comercial</option>
+        <option value="respDoc">Resp. Doc</option>
+        <option value="respVistoria">Resp. Vistoria</option>
+        <option value="contatoVistoria">Contato</option>
+        <option value="tipoContrato">Tipo Contrato</option>
+        <option value="planilha">Planilha</option>
+        <option value="procuracao">Procuração</option>
+        <option value="soc">SOC</option>
+        <option value="checklist">Checklist</option>
+        <option value="nr1psico">NR1 Psico</option>
+        <option value="nr1rel">NR1 Relatório</option>
+        <option value="ghe">GHE</option>
+      </select>
+    </div>
+    <div style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Filtrar por serviço pendente:</div>
     <div class="rel-filters" id="rel-filters"></div>
-    <div class="rel-count" id="rel-count"></div>
+    <div class="rel-count" id="rel-count" style="margin-top:10px"></div>
     <div class="rel-results" id="rel-results"></div>
-    <div class="alert-close" style="margin-top:12px"><button onclick="closeRelatorio()">Fechar</button></div>
+    <div class="alert-close" style="margin-top:12px">
+      <button onclick="limparRelatorio()" style="margin-right:8px;background:#f3f4f6;border:none;border-radius:8px;padding:8px 16px;font-size:13px;cursor:pointer">Limpar</button>
+      <button onclick="closeRelatorio()">Fechar</button>
+    </div>
   </div>
 </div>
 
@@ -690,11 +718,22 @@ let relFiltroAtivo = null;
 function openRelatorio() {
   relFiltroAtivo = null;
   renderRelFiltros();
-  document.getElementById('rel-results').innerHTML = '<div class="rel-empty">Selecione um tipo de pendência acima para ver o relatório</div>';
+  document.getElementById('rel-results').innerHTML = '<div class="rel-empty">Selecione uma pendência ou use o PROCV acima para buscar</div>';
   document.getElementById('rel-count').textContent = '';
+  document.getElementById('procv-input').value = '';
+  document.getElementById('procv-col').value = 'todas';
   document.getElementById('modal-relatorio').classList.add('open');
 }
 function closeRelatorio() { document.getElementById('modal-relatorio').classList.remove('open'); }
+
+function limparRelatorio() {
+  relFiltroAtivo = null;
+  document.getElementById('procv-input').value = '';
+  document.getElementById('procv-col').value = 'todas';
+  renderRelFiltros();
+  document.getElementById('rel-results').innerHTML = '<div class="rel-empty">Selecione uma pendência ou use o PROCV acima para buscar</div>';
+  document.getElementById('rel-count').textContent = '';
+}
 
 function renderRelFiltros() {
   const wrap = document.getElementById('rel-filters');
@@ -705,31 +744,65 @@ function renderRelFiltros() {
   }).join('');
 }
 
-function aplicarRelFiltro(id) {
-  relFiltroAtivo = id;
-  renderRelFiltros();
-  const pend = PENDENCIAS.find(p => p.id === id);
-  if (!pend) return;
-  const resultados = records.filter(r => !r.finalizado && pend.check(r));
-  document.getElementById('rel-count').textContent = `${resultados.length} empresa(s) encontrada(s)`;
+function renderRelTabela(resultados, titulo) {
+  document.getElementById('rel-count').textContent = `${resultados.length} empresa(s) encontrada(s) — ${titulo}`;
   if (resultados.length === 0) {
-    document.getElementById('rel-results').innerHTML = '<div class="rel-empty">✅ Nenhuma empresa com esta pendência!</div>';
+    document.getElementById('rel-results').innerHTML = '<div class="rel-empty">✅ Nenhuma empresa encontrada!</div>';
     return;
   }
   document.getElementById('rel-results').innerHTML = `
     <table>
-      <thead><tr><th>EMPRESA</th><th>RESP COMERCIAL</th><th>BAIRRO</th><th>DATA CONTRATO</th><th>DIAS</th></tr></thead>
+      <thead><tr><th>EMPRESA</th><th>FANTASIA</th><th>BAIRRO</th><th>RESP COMERCIAL</th><th>CONTATO VISTORIA</th><th>DATA CONTRATO</th><th>DIAS</th></tr></thead>
       <tbody>${resultados.map(r => {
         const dias = calcDiasContrato(r);
         return `<tr>
-          <td><b>${esc(r.empresa || '—')}</b><br><small style="color:#6b7280">${esc(r.fantasia||'')}</small></td>
-          <td>${esc(r.respComercial||'—')}</td>
+          <td><b>${esc(r.empresa || '—')}</b></td>
+          <td>${esc(r.fantasia||'—')}</td>
           <td>${esc(r.bairro||'—')}</td>
+          <td>${esc(r.respComercial||'—')}</td>
+          <td>${esc(r.contatoVistoria||'—')}</td>
           <td>${r.dataContrato||'—'}</td>
-          <td>${dias > 0 ? '<b style="color:'+(dias>20?'#dc2626':'inherit')+'">'+dias+' dias</b>' : '—'}</td>
+          <td>${dias > 0 ? '<b style="color:'+(dias>20?'#dc2626':dias>10?'#f59e0b':'inherit')+'">'+dias+'d</b>' : '—'}</td>
         </tr>`;
       }).join('')}</tbody>
     </table>`;
+}
+
+function aplicarRelFiltro(id) {
+  relFiltroAtivo = id;
+  document.getElementById('procv-input').value = '';
+  renderRelFiltros();
+  const pend = PENDENCIAS.find(p => p.id === id);
+  if (!pend) return;
+  const resultados = records.filter(r => !r.finalizado && pend.check(r));
+  renderRelTabela(resultados, pend.label);
+}
+
+// PROCV — busca livre em todas as colunas ou coluna específica
+function aplicarProcv() {
+  const q = (document.getElementById('procv-input').value || '').toLowerCase().trim();
+  const col = document.getElementById('procv-col').value;
+  if (!q) {
+    relFiltroAtivo = null;
+    renderRelFiltros();
+    document.getElementById('rel-results').innerHTML = '<div class="rel-empty">Selecione uma pendência ou use o PROCV acima para buscar</div>';
+    document.getElementById('rel-count').textContent = '';
+    return;
+  }
+  relFiltroAtivo = null;
+  renderRelFiltros();
+  const CAMPOS = {
+    empresa: r => r.empresa, fantasia: r => r.fantasia, bairro: r => r.bairro,
+    respComercial: r => r.respComercial, respDoc: r => r.respDoc,
+    respVistoria: r => r.respVistoria, contatoVistoria: r => r.contatoVistoria,
+    tipoContrato: r => r.tipoContrato, planilha: r => r.planilha,
+    procuracao: r => r.procuracao, soc: r => r.soc, checklist: r => r.checklist,
+    nr1psico: r => r.nr1psico, nr1rel: r => r.nr1rel, ghe: r => r.ghe,
+    todas: r => Object.values(r).join(' ')
+  };
+  const fn = CAMPOS[col] || CAMPOS.todas;
+  const resultados = records.filter(r => (fn(r)||'').toLowerCase().includes(q));
+  renderRelTabela(resultados, `PROCV: "${q}"`);
 }
 
 // ─── STATS ────────────────────────────────────────────────────────────────────
