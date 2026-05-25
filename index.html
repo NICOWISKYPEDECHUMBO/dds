@@ -135,8 +135,8 @@
   .prazo-badge.critico { background: #dc2626; color: #fff; }
   .prazo-badge.atencao { background: #f59e0b; color: #fff; }
 
-  .table-wrap { overflow-x: hidden; padding-bottom: 0; }
-  .scroll-x-container { overflow-x: auto; }
+  .table-wrap { overflow-x: hidden; padding-bottom: 40px; }
+  .scroll-x-container { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 130px); }
   .scroll-x-container::-webkit-scrollbar { height: 10px; }
   .scroll-x-container::-webkit-scrollbar-track { background: #e5e7eb; }
   .scroll-x-container::-webkit-scrollbar-thumb { background: #9ca3af; border-radius: 5px; }
@@ -153,6 +153,8 @@
   .scroll-bottom-spacer { height: 1px; }
   table { border-collapse: collapse; min-width: 100%; background: #fff; }
   thead { position: sticky; top: 0; z-index: 50; }
+  /* garante que o scroll-x-container não esconde o thead atrás do header+toolbar */
+  .scroll-x-container { padding-top: 0; }
 
   thead tr th {
     background: #1f2d40; color: #fff;
@@ -631,6 +633,24 @@ function getSheet() {
   }
   return sh;
 }
+function fmtDate(v) {
+  if (!v || v === '') return '';
+  if (v instanceof Date) {
+    var y = v.getFullYear(), m = v.getMonth()+1, d = v.getDate();
+    if (y < 1900) return '';
+    return y+'-'+(m<10?'0'+m:m)+'-'+(d<10?'0'+d:d);
+  }
+  var s = String(v).trim();
+  if (!s || s === '0') return '';
+  // already YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  // DD/MM/YYYY
+  var m2 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m2) return m2[3]+'-'+(m2[2].length<2?'0':'')+m2[2]+'-'+(m2[1].length<2?'0':'')+m2[1];
+  return s;
+}
+var DATE_COLS = ['dataContrato','dataVistoria','planilha','procuracao','soc',
+  'checklist','nr1psico','nr1rel','ghe','emissaoPdf','pgto2','envioPdf','dataReuniao'];
 function load() {
   const sh = getSheet();
   const data = sh.getDataRange().getValues();
@@ -638,7 +658,10 @@ function load() {
   const records = data.slice(1).map(row => {
     const obj = {};
     headers.forEach((h,i) => {
-      obj[h] = row[i] === true ? true : row[i] === false ? false : String(row[i] || '');
+      var v = row[i];
+      if (v === true || v === false) { obj[h] = v; return; }
+      if (DATE_COLS.indexOf(h) >= 0) { obj[h] = fmtDate(v); return; }
+      obj[h] = String(v || '');
     });
     obj.finalizado = obj.finalizado === true || obj.finalizado === 'true';
     return obj;
@@ -699,9 +722,10 @@ function setSync(state, msg) {
   document.getElementById('sync-txt').textContent = msg;
 }
 
-// Converte qualquer formato de data para YYYY-MM-DD
+// Converte QUALQUER formato de data para YYYY-MM-DD
 function parseDate(val) {
   if (!val && val !== 0) return '';
+  // Objeto Date real
   if (val instanceof Date && !isNaN(val)) {
     const y = val.getFullYear();
     const m = String(val.getMonth()+1).padStart(2,'0');
@@ -709,22 +733,48 @@ function parseDate(val) {
     return y+'-'+m+'-'+d;
   }
   const s = val.toString().trim();
-  if (!s || s === '0') return '';
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
-  // DD/MM/YYYY
+  if (!s || s === '0' || s.toLowerCase() === 'invalid date') return '';
+  // Já está em YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // YYYY-MM-DD com hora (ISO)
+  if (/^\d{4}-\d{2}-\d{2}T/.test(s) || /^\d{4}-\d{2}-\d{2} /.test(s)) {
+    return s.slice(0,10);
+  }
+  // DD/MM/YYYY ou D/M/YYYY
   let match = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
   if (match) return match[3]+'-'+match[2].padStart(2,'0')+'-'+match[1].padStart(2,'0');
-  // MM-DD-YYYY
-  match = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})/);
-  if (match) return match[3]+'-'+match[1].padStart(2,'0')+'-'+match[2].padStart(2,'0');
-  // Excel serial
-  const n = parseFloat(s);
-  if (!isNaN(n) && n > 40000 && n < 60000) {
-    const dt = new Date(Math.round((n-25569)*86400*1000));
+  // MM/DD/YYYY americano (ex: 05/10/2024)
+  match = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (match && parseInt(match[1]) <= 12) {
+    // tenta detectar: se dia > 12, é DD/MM
+    if (parseInt(match[2]) > 12)
+      return match[3]+'-'+match[1].padStart(2,'0')+'-'+match[2].padStart(2,'0');
+  }
+  // Fri Jan 10 2025 ... ou Mon May 10 2024 00:00:00 GMT...
+  // "Sat, 10 May 2025 00:00:00 GMT" ou "Fri May 10 2024 00:00:00 GMT-0300"
+  const monthMap = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+  match = s.match(/(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})/);
+  if (!match) match = s.match(/([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})/);
+  if (match) {
+    // try "DD Mon YYYY" first
+    let day, mon, year;
+    if (/^\d/.test(match[1])) { day=match[1]; mon=match[2]; year=match[3]; }
+    else { mon=match[1]; day=match[2]; year=match[3]; }
+    const mNum = monthMap[mon.toLowerCase().slice(0,3)];
+    if (mNum) return year+'-'+String(mNum).padStart(2,'0')+'-'+String(day).padStart(2,'0');
+  }
+  // Tenta new Date() como último recurso
+  const dt = new Date(s);
+  if (!isNaN(dt.getTime())) {
+    // usa UTC para evitar offset de timezone
     return dt.getUTCFullYear()+'-'+String(dt.getUTCMonth()+1).padStart(2,'0')+'-'+String(dt.getUTCDate()).padStart(2,'0');
   }
-  const part = s.split(/[ T]/)[0];
-  if (part !== s) return parseDate(part);
+  // Excel serial numérico
+  const n = parseFloat(s);
+  if (!isNaN(n) && n > 40000 && n < 60000) {
+    const dtx = new Date(Math.round((n-25569)*86400*1000));
+    return dtx.getUTCFullYear()+'-'+String(dtx.getUTCMonth()+1).padStart(2,'0')+'-'+String(dtx.getUTCDate()).padStart(2,'0');
+  }
   return '';
 }
 
@@ -827,7 +877,9 @@ function hideBanner() {
   localStorage.setItem('banner_hidden','1');
   document.getElementById('config-banner').style.display = 'none';
   document.getElementById('toolbar').style.top = 'var(--header-h)';
+  // toolbar ~46px
   document.getElementById('table-wrap').style.marginTop = 'calc(var(--header-h) + 46px)';
+  document.getElementById('scroll-x').style.maxHeight = 'calc(100vh - var(--header-h) - 46px)';
 }
 
 // ─── ALERTAS DE PRAZO ─────────────────────────────────────────────────────────
@@ -1121,89 +1173,122 @@ function importarPlanilha(input) {
   reader.onload = function(e) {
     try {
       const data = new Uint8Array(e.target.result);
-      const wb = XLSX.read(data, {type: 'array', cellDates: true, cellNF: true});
+      // cellDates:true → datas viram objetos Date; raw:true → números ficam como número
+      const wb = XLSX.read(data, {type:'array', cellDates:true, raw:true});
 
       const sheetName = wb.SheetNames.find(n =>
         n.toUpperCase().includes('CRONOGRAMA') || n.toUpperCase().includes('ATENDIMENTO')
       ) || wb.SheetNames[0];
 
       const ws = wb.Sheets[sheetName];
-      const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:false, dateNF:'yyyy-mm-dd', defval:''});
+      // raw:true para pegar valores reais (Date, number, string)
+      const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:null});
 
       if (rows.length < 2) { alert('Planilha sem dados!'); return; }
 
       const header = rows[0].map(h => (h||'').toString().toUpperCase().trim());
 
-      function col(row, names) {
+      // Pega índice de uma coluna pelo nome parcial
+      function idx(names) {
         for (const n of names) {
           const i = header.findIndex(h => h.includes(n));
-          if (i >= 0 && row[i] !== undefined) return (row[i]||'').toString().trim();
+          if (i >= 0) return i;
+        }
+        return -1;
+      }
+
+      // Pega valor bruto de uma célula — trata null/undefined
+      function raw(row, names) {
+        const i = idx(names);
+        if (i < 0) return null;
+        const v = row[i];
+        return (v === null || v === undefined) ? null : v;
+      }
+
+      // Converte valor para YYYY-MM-DD, aceita Date, número serial Excel, string
+      function toDate(v) {
+        if (v === null || v === undefined || v === '') return '';
+        // Objeto Date real (cellDates:true)
+        if (v instanceof Date && !isNaN(v)) {
+          const y = v.getFullYear(), m = v.getMonth()+1, d = v.getDate();
+          if (y < 1900) return '';
+          return y+'-'+String(m).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+        }
+        const s = v.toString().trim();
+        if (!s || s === '0') return '';
+        // Já YYYY-MM-DD
+        if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+        // DD/MM/YYYY
+        let m2 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+        if (m2) return m2[3]+'-'+m2[2].padStart(2,'0')+'-'+m2[1].padStart(2,'0');
+        // Serial numérico Excel (ex: 45000)
+        const n = parseFloat(s);
+        if (!isNaN(n) && n > 40000 && n < 60000) {
+          const dt = new Date(Math.round((n-25569)*86400*1000));
+          return dt.getUTCFullYear()+'-'+String(dt.getUTCMonth()+1).padStart(2,'0')+'-'+String(dt.getUTCDate()).padStart(2,'0');
+        }
+        // Tenta new Date como último recurso
+        const dt2 = new Date(s);
+        if (!isNaN(dt2.getTime())) {
+          return dt2.getUTCFullYear()+'-'+String(dt2.getUTCMonth()+1).padStart(2,'0')+'-'+String(dt2.getUTCDate()).padStart(2,'0');
         }
         return '';
       }
 
-      function parseDate(val) {
-        if (!val && val !== 0) return '';
-        if (val instanceof Date && !isNaN(val)) {
-          const y = val.getFullYear();
-          const m = String(val.getMonth()+1).padStart(2,'0');
-          const d = String(val.getDate()).padStart(2,'0');
-          return `${y}-${m}-${d}`;
-        }
-        const s = val.toString().trim();
-        if (!s || s === '0') return '';
-        if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
-        let match = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-        if (match) return `${match[3]}-${match[2].padStart(2,'0')}-${match[1].padStart(2,'0')}`;
-        match = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})/);
-        if (match) return `${match[3]}-${match[1].padStart(2,'0')}-${match[2].padStart(2,'0')}`;
-        const n = parseFloat(s);
-        if (!isNaN(n) && n > 40000 && n < 60000) {
-          const d = new Date(Math.round((n - 25569)*86400*1000));
-          const y2 = d.getUTCFullYear();
-          const mo = String(d.getUTCMonth()+1).padStart(2,'0');
-          const da = String(d.getUTCDate()).padStart(2,'0');
-          return `${y2}-${mo}-${da}`;
-        }
-        const part = s.split(/[ T]/)[0];
-        if (part !== s) return parseDate(part);
-        return s;
+      // Pega valor como texto simples
+      function toStr(v) {
+        if (v === null || v === undefined) return '';
+        if (v instanceof Date) return ''; // datas viram toDate, não toStr
+        return v.toString().trim();
+      }
+
+      // Pega campo: se for data retorna YYYY-MM-DD, senão retorna texto
+      function colDate(row, names) { return toDate(raw(row, names)); }
+      function colStr(row, names) {
+        const v = raw(row, names);
+        if (v instanceof Date) return toDate(v); // às vezes tipo contrato tem data por engano
+        return toStr(v);
       }
 
       const imported = [];
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
         if (!row || row.length < 3) continue;
-        const empresa = col(row, ['EMPRESA']);
+        const empIdx = idx(['EMPRESA']);
+        const empresa = empIdx >= 0 ? toStr(row[empIdx]) : '';
         if (!empresa || empresa.toUpperCase() === 'EMPRESA') continue;
 
-        const finVal = col(row, ['FINALIZADO']).toUpperCase();
+        const finV = raw(row, ['FINALIZADO']);
+        const finStr = toStr(finV).toUpperCase();
+        const finalizado = finV === true || finStr === 'TRUE' || finStr === '1' || finStr === 'SIM' || finStr === 'X';
+
         imported.push({
           id: 'imp' + Date.now() + i,
-          finalizado: finVal === 'TRUE' || finVal === '1' || finVal === 'SIM',
-          respComercial: col(row, ['RESP COMERCIAL','RESPONSÁVEL COMERCIAL','RESP. COMERCIAL']),
-          respDoc:       col(row, ['RESP DOC','RESPONSÁVEL DOC','RESP. DOC']),
-          dataContrato:  parseDate(col(row, ['DATA CONTRATO','DATA DO CONTRATO'])),
-          pgtoSinal:     col(row, ['PGTO DO SINAL','PGTO SINAL','PAGAMENTO SINAL']),
-          tipoContrato:  col(row, ['TIPO CONTRATO','TIPO DE CONTRATO']),
-          empresa:       empresa,
-          fantasia:      col(row, ['NOME FANTASIA','FANTASIA']),
-          dataVistoria:  parseDate(col(row, ['DATA VISTORIA'])),
-          bairro:        col(row, ['BAIRRO']),
-          respVistoria:  col(row, ['NOME RESPONSÁVEL DA VISTORIA','RESP. VISTORIA','RESP VISTORIA']),
-          contatoVistoria: col(row, ['CONTATO DO RESPONS','CONTATO RESP']),
-          planilha:      parseDate(col(row, ['PLANILHA RECEBIDA','PLANILHA'])),
-          procuracao:    parseDate(col(row, ['PROCURA','PROCURAÇÃO'])),
-          soc:           parseDate(col(row, ['CADASTRO PLANILHA NO SOC','CADASTRO PLANILHA','SOC'])),
-          checklist:     parseDate(col(row, ['CHECKLIST'])),
-          nr1psico:      parseDate(col(row, ['NR 1 - PSICO','NR1 PSICO','NR1-PSICO'])),
-          nr1rel:        parseDate(col(row, ['NR 1 - RELATÓRIO','NR1 RELATÓRIO','NR1-REL','NR 1 - RELAT'])),
-          ghe:           parseDate(col(row, ['CADASTRO GHE','GHE'])),
-          emissaoPdf:    parseDate(col(row, ['EMISSÃO PDF','EMISSAO PDF'])),
-          pgto2:         parseDate(col(row, ['PGTO 2','PGTO 2 PARCELA','2 PARCELA'])),
-          envioPdf:      parseDate(col(row, ['ENVIO PDF'])),
-          dataReuniao:   parseDate(col(row, ['DATA REUNIÃO','DATA REUNIAO'])),
-          eventos:       col(row, ['ENVIO EVENTOS','EVENTOS'])
+          finalizado,
+          createdAt: null,
+          respComercial:   colStr(row, ['RESP COMERCIAL','RESPONSÁVEL COMERCIAL','RESP. COMERCIAL']),
+          respDoc:         colStr(row, ['RESP DOC','RESPONSÁVEL DOC','RESP. DOC']),
+          dataContrato:    colDate(row, ['DATA CONTRATO','DATA DO CONTRATO']),
+          pgtoSinal:       colStr(row, ['PGTO DO SINAL','PGTO SINAL','PAGAMENTO SINAL']),
+          tipoContrato:    colStr(row, ['TIPO CONTRATO','TIPO DE CONTRATO']),
+          empresa,
+          fantasia:        colStr(row, ['NOME FANTASIA','FANTASIA']),
+          dataVistoria:    colDate(row, ['DATA VISTORIA']),
+          bairro:          colStr(row, ['BAIRRO']),
+          respVistoria:    colStr(row, ['NOME RESPONSÁVEL DA VISTORIA','RESP. VISTORIA','RESP VISTORIA']),
+          contatoVistoria: colStr(row, ['CONTATO DO RESPONS','CONTATO RESP','VIISTORIA','VISTORIA']),
+          planilha:        colDate(row, ['PLANILHA RECEBIDA','PLANILHA']),
+          procuracao:      colDate(row, ['PROCURA','PROCURAÇÃO','PROCURACAO']),
+          soc:             colDate(row, ['CADASTRO PLANILHA NO SOC','CADASTRO PLANILHA','SOC']),
+          checklist:       colDate(row, ['CHECKLIST']),
+          nr1psico:        colDate(row, ['NR 1 - PSICO','NR1 PSICO','NR1-PSICO']),
+          nr1rel:          colDate(row, ['NR 1 - RELATÓRIO','NR 1 - RELATORIO','NR1 RELATÓRIO','NR1-REL','NR 1 - RELAT','RELATÓRIO FINALIZADO']),
+          ghe:             colDate(row, ['CADASTRO GHE','GHE E RISCOS','GHE']),
+          emissaoPdf:      colDate(row, ['EMISSÃO PDF','EMISSAO PDF']),
+          pgto2:           colDate(row, ['PGTO 2 PARCELA','PGTO 2','2 PARCELA']),
+          envioPdf:        colDate(row, ['ENVIO PDF']),
+          dataReuniao:     colDate(row, ['DATA REUNIÃO','DATA REUNIAO','REUNIÃO DE ENTREGA']),
+          eventos:         colStr(row, ['ENVIO EVENTOS','EVENTOS'])
         });
       }
 
@@ -1302,6 +1387,7 @@ function fecharSirene() {
   } else {
     document.getElementById('toolbar').style.top = 'calc(var(--header-h) + 44px)';
     document.getElementById('table-wrap').style.marginTop = 'calc(var(--header-h) + 44px + 46px)';
+    document.getElementById('scroll-x').style.maxHeight = 'calc(100vh - var(--header-h) - 44px - 46px)';
   }
   if (SCRIPT_URL) { loadFromSheets(); }
   else { loadLocal(); }
